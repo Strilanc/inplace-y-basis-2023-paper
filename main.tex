@@ -1,0 +1,838 @@
+\documentclass[onecolumn,unpublished,a4paper]{quantumarticle}
+\usepackage[utf8]{inputenc}
+\usepackage[backend=biber,style=alphabetic,maxbibnames=999]{biblatex}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{amsfonts}
+\usepackage[caption=false]{subfig}
+\usepackage[colorlinks]{hyperref}
+\usepackage[all]{hypcap}
+\usepackage{tikz}
+\usepackage{relsize}
+\usepackage{color,soul}
+\usepackage{capt-of}
+\usepackage{mathtools}
+\usepackage{float}
+\usepackage[section]{placeins}
+\usepackage{listings}
+\usepackage[T1]{fontenc}  % Without this, underscores lost when copy-pasting output!
+\usetikzlibrary{decorations.pathreplacing}
+\usepackage{braket}
+
+\addbibresource{refs.bib}
+
+\DeclareFixedFont{\ttb}{T1}{txtt}{bx}{n}{4}
+\DeclareFixedFont{\ttm}{T1}{txtt}{m}{n}{4}
+\definecolor{deepblue}{rgb}{0,0,0.5}
+\definecolor{deepred}{rgb}{0.6,0,0}
+\definecolor{deepgreen}{rgb}{0,0.5,0}
+\newcommand\cppstyle{\lstset{
+language=C++,
+basicstyle=\ttm,
+otherkeywords={uint8_t, __m256i, size_t, ASSERT_TRUE, EXPECT_TRUE, TEST, BENCHMARK},
+keywordstyle=\ttb\color{deepblue},
+emphstyle=\ttb\color{deepblue},
+stringstyle=\color{deepgreen},
+commentstyle=\fontfamily{txtt}\selectfont\color{gray},
+showstringspaces=false,
+literate={*}{{\char42}}1
+         {-}{{\char45}}1
+}}
+\lstnewenvironment{cpp}[1][]
+{\cppstyle\lstset{#1}}{}
+
+\newcommand\pythonstyle{\lstset{
+language=python,
+basicstyle=\ttm,
+morekeywords={assert,as,echo},
+keywordstyle=\ttb\color{deepblue},
+emphstyle=\ttb\color{deepblue},
+stringstyle=\color{deepgreen},
+commentstyle=\fontfamily{txtt}\selectfont\color{gray},
+showstringspaces=false,
+literate={*}{{\char42}}1
+         {-}{{\char45}}1
+}}
+\lstnewenvironment{python}[1][]
+{\pythonstyle\lstset{#1}}{}
+
+\lstdefinestyle{stimcircuit}{
+    language=python,
+    basicstyle=\fontsize{6}{6}\selectfont\ttfamily,
+    upquote=true,
+    stepnumber=1,
+    numbersep=8pt,
+    showstringspaces=false,
+    breaklines=true,
+    frame=single,
+    aboveskip=1.5em,
+    belowskip=1.5em,
+    commentstyle=\color{gray},
+    classoffset=1,
+    morekeywords={DETECTOR,OBSERVABLE_INCLUDE,rec},
+    keywordstyle=\color{deepgreen},
+    classoffset=2,
+    morekeywords={H,R,MPP,M,RX,RY,MY,MX,SQRT\_X,XCY,XCZ,YCX},
+    keywordstyle=\color{deepblue},
+    classoffset=3,
+    morekeywords={X_ERROR,DEPOLARIZE2,DEPOLARIZE1},
+    keywordstyle=\color{red},
+    classoffset=4,
+    morekeywords={TICK,SHIFT_COORDS,QUBIT_COORDS},
+    keywordstyle=\color{gray}
+}
+
+% Boo Roman Numerals.
+\renewcommand\thesection{\arabic{section}}
+
+% Hyperlinked references to figures, theorems, etc.
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\theoremstyle{definition}
+\newtheorem{theorem}[definition]{Theorem}
+\theoremstyle{definition}
+\newtheorem{lemma}[definition]{Lemma}
+\newcommand{\eq}[1]{\hyperref[eq:#1]{Equation~\ref*{eq:#1}}}
+\renewcommand{\sec}[1]{\hyperref[sec:#1]{Section~\ref*{sec:#1}}}
+\DeclareRobustCommand{\app}[1]{\hyperref[app:#1]{Appendix~\ref*{app:#1}}}
+\newcommand{\fig}[1]{\hyperref[fig:#1]{Figure~\ref*{fig:#1}}}
+\newcommand{\tbl}[1]{\hyperref[tbl:#1]{Table~\ref*{tbl:#1}}}
+\newcommand{\theoremref}[1]{\hyperref[theorem:#1]{Theorem~\ref*{theorem:#1}}}
+\newcommand{\definitionref}[1]{\hyperref[definition:#1]{Definition~\ref*{definition:#1}}}
+
+\begin{document}
+\title{Inplace Access to the Surface Code Y Basis}
+
+\date{\today}
+\author{Craig Gidney}
+\email{craig.gidney@gmail.com}
+\affiliation{Google Quantum AI, Santa Barbara, California 93117, USA}
+
+\begin{abstract}
+In this paper, I cut the cost of Y basis measurement and initialization in the surface code by nearly an order of magnitude.
+By fusing twist defects diagonally across the surface code patch, the Y basis is reached in $\lfloor d/2 \rfloor + 2$ rounds without leaving the bounding box of the patch and without reducing the code distance.
+I use Monte Carlo sampling to benchmark the performance of the construction under circuit noise, and to analyze the distribution of logical errors.
+Cheap inplace Y basis measurement reduces the cost of S gates and magic state factories, and unlocks tomography of surface code qubits on space-limited hardware.
+\end{abstract}
+
+\emph{The source code that was written, the exact noisy circuits that were sampled, and the statistics that were collected as part of this paper are available at \href{https://doi.org/10.5281/zenodo.7487893}{doi.org/10.5281/zenodo.7487893}~\cite{gidneyybasisdata2022}.}
+
+\maketitle
+
+\section{Introduction}
+\label{sec:introduction}
+
+Because the surface code is a CSS code, its X and Z observables can be measured transversally.
+The Y observable can't be measured transversally, and so must be reached by other means.
+The cost of Y basis measurement is surprisingly relevant to the overall cost of surface code computations because, in many magic state factory designs~\cite{fowler2018latticesurgery,gidney2019catalyzeddistillation,litinski2018}, distilling a magic state involves hundreds of Y basis measurements.
+If running Shor's algorithm costs a billion Toffoli gates~\cite{gidney2017factoring,soeken2020improved} then, by implication, running Shor's algorithm also costs hundreds of billions of Y basis measurements.
+The inefficiency of magic state factories magnifies the benefits of improving the cost of Y basis measurement.
+
+Over the past decade, the cost of Y basis measurement and initialization in the surface code has dropped dramatically (see \fig{historical_progression}).
+Originally, the only known way to reach the Y basis was by distillation of the $|i\rangle$ state~\cite{aliferis2005quantum,fowler2012surfacecodereview,fowler2012bridge}.
+It was then realized that once an initial seed $|i\rangle$ state was prepared, it could catalyze the production of more $|i\rangle$ states~\cite{fowler2012surfacecodereview,gidney2017slightly}.
+Later, it was shown that the $S$ gate could be performed by braiding twist defects, allowing $|i\rangle$ to be reached without distillation~\cite{brown2017surfacetwists,bombin2021logical,chamberland2022universal}.
+This paper builds on these previous improvements, saving nearly another order of magnitude in the cost of reaching the Y basis.
+
+A notable technique for reaching the Y basis, not mentioned in the previous paragraph, is folding the surface code patch~\cite{moussa2016folded}.
+In a folded surface code patch, Y basis measurement can be performed in constant depth.
+However, folding requires non-planar connectivity (or substantial routing overhead).
+In this paper, I'm only interested in solutions with planar connectivity.
+The reason for this focus is because I'm part of a superconducting qubit group, and superconducting qubit chips usually have planar connectivity~\cite{Andersen2020,googlerepcode2021,Zhao2022}.
+That said, for completeness, I've included simulation results from folded surface codes in some figures.
+
+The paper proceeds as follows.
+In \sec{construction}, I'll explain the high level strategy and low level details behind my implementation of the Y basis measurement.
+In \sec{benchmarking}, I'll describe and present statistics from various simulated experiments I performed, with the goal of understanding the quantity and causes of logical errors in the Y basis measurement.
+In \sec{conclusion}, I'll summarize the results and discuss ideas for future work.
+The paper also includes \app{defects}, which gives a summary of the surface code defects shown in diagrams, \app{noise_model}, which defines the superconducting-inspired noise model used in this paper, \app{the_struggle}, which contains some remarks on how I managed the complexity of creating these circuits, and \app{example_circuit}, which contains a small example circuit preparing an $|i\rangle$ state.
+
+\begin{figure}
+    \centering
+    \resizebox{\linewidth}{!}{
+        \includegraphics{assets/historical_progression.png}
+    }
+    \caption{
+    Defect diagrams of historical methods for planar initialization of $|i\rangle$ in the surface code, showing the huge improvement over time.
+    The right-most object is the construction proposed in this paper.
+    See \tbl{defect_types} for a legend of defect types shown in the diagram.
+    }
+    \label{fig:historical_progression}
+\end{figure}
+
+
+
+
+
+\section{Circuit Construction}
+\label{sec:construction}
+
+Surface code computation is topological in nature.
+Constructions can be deformed without changing their function, because their function is defined by topological invariants such as whether two spacetime defects are connected.
+Thus, the first step to creating a surface code construction is to understand its topology.
+
+One way to find a topological implementation of an operation is to decompose it into operations whose topology you already know, connect them together, and deform the combined object to simplify it.
+Recall that a surface code patch has four twist defects, one at each corner~\cite{brown2017surfacetwists}.
+The Y basis measurement can be decomposed into an S gate followed by an X basis measurement.
+The S gate's topology is to exchange the two twists at the ends of an X type boundary of the surface code patch~\cite{brown2017surfacetwists}.
+The X basis measurement's topology is to pair twists that share a Z type boundary, and then within each pair annihilate the twists by fusing them.
+The topological result of composing these two operations also fuses twist defects, but it pairs the twist defects across the diagonals of the patch.
+Thus, the topology of the Y basis measurement is to fuse twists diagonally (see \fig{topological_decomposition} and \fig{topological_explosion}).
+
+In previous work, measuring a surface code qubit in the Y basis required increasing the size of the patch, in order to move twists without letting them get too close to each other~\cite{brown2017surfacetwists,bombin2021logical,chamberland2022universal}.
+My goal for this paper was to move the twists without resizing the patch.
+This requires the twists to travel diagonally across the patch, without compromising the code distance of the circuit.
+
+The simplest circuit I found for moving a twist diagonally is summarized in \fig{bulk_diagonal_twist}.
+However, although that circuit is simple, it isn't efficient.
+After the twist moves through the diagonal, the surface code cycle has to wait while the data qubits are moved to close the gap created by the twist's passage.
+
+Finding a good circuit implementing the twist movement is difficult.
+The circuit has to measure all stabilizers of the input patch.
+The circuit has to change the boundary type of the patch.
+The circuit has to prepare all stabilizers of the output patch.
+The circuit has to orient and order operations carefully.
+As an example, note that the distance of the spacelike Y error (see \fig{logical_error_paths}) is halved if two-qubit gates are pointed towards the crossing twist (instead of along it) during the middle two layers of the surface code cycle.
+The tactics I used to find satisfying circuits are summarized in \app{the_struggle}.
+
+The best circuit that I found for moving a twist diagonally is summarized in \fig{patch_diagonal_twist}, and shown exactly in \fig{transition_detector_slices}.
+This circuit manages to merge all necessary qubit movement into a working surface code cycle, while using only one additional layer of entangling gates, and while preserving the full code distance.
+
+Locally, the reason the circuit in \fig{transition_detector_slices} works is because it is measuring all the stabilizers of the input surface code configuration and preparing all the stabilizers of the output surface code configuration.
+Globally, the reason this circuit works is because it changes the boundary type sequence of the surface code patch from XZXZ to XXZZ.
+These local and global changes have the combined effect of fault tolerantly mapping the Y observable to a known product of stabilizers.
+A patch with XXZZ boundaries isn't capable of storing a logical qubit.
+Instead, this patch has the property that, by multiplying all of the X basis stabilizers together, you can derive the value of a degenerate X observable running along the Z boundary.
+This product of stabilizers is what the Y observable is mapped to.
+By repeatedly measuring the stabilizers of the patch, you learn this product to arbitrarily high certainty~\cite{gidney2022stability}.
+As will be shown in the next section, it's sufficient to measure these stabilizers $d/2$ times.
+The measurement process is finished by destroying the patch by measuring all of its data qubits.
+To maximize code distance, each data qubit is measured in the basis of its closest boundary.
+
+I checked the code distance of this construction using \href{https://github.com/quantumlib/Stim/blob/main/doc/python_api_reference_vDev.md#stim.Circuit.search_for_undetectable_logical_errors}{stim's heuristic search}~\cite{gidney2021stim}.
+The shortest error it finds, when applying circuit noise to a $d \times d$ patch, has $d$ parts.
+This is why I claim my construction of the Y basis measurement achieves the full code distance of the patch.
+
+\begin{figure}
+    \centering
+    \resizebox{0.7\linewidth}{!}{
+        \includegraphics{assets/topological_decomposition.png}
+    }
+    \caption{
+        Deriving that the Y basis measurement fuses twist defects diagonally, by decomposing $M_Y$ into $S$ followed by $M_X$.
+        See \tbl{defect_types} for a summary of the types of defects appearing in this diagram.
+    }
+    \label{fig:topological_decomposition}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \resizebox{\linewidth}{!}{
+    \includegraphics{assets/topological_explosion.png}
+    }
+    \caption{
+        Exploded defect diagram of an inplace Y basis measurement.
+        See \tbl{defect_types} for a summary of the types of defects appearing in this diagram.
+    }
+    \label{fig:topological_explosion}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \resizebox{\linewidth}{!}{
+    \includegraphics{assets/bulk_diagonal_twist.png}
+    }
+    \caption{
+        An example of moving a twist diagonally through the bulk of the surface code.
+        Boundaries not included.
+        Simpler than the actual construction used by this paper (see \fig{patch_diagonal_twist} and \fig{transition_detector_slices}).
+        The black circles connected to gray triangles are controlled-Y operations.
+        The small yellow squares are Hadamard operations.
+        The red shapes are X stabilizers.
+        The blue shapes are Z stabilizers.
+    }
+    \label{fig:bulk_diagonal_twist}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \resizebox{0.7\linewidth}{!}{
+    \includegraphics{assets/patch_diagonal_twist.png}
+    }
+    \caption{
+        Stabilizer flow during the key cycle of Y basis measurement.
+        Red shapes are X stabilizers.
+        Blue shapes are Z stabilizers.
+        In the top right region X stabilizers take one step down while Z stabilizers take one step left.
+        Transversal Hadamards turn the shifted X stabilizers into Z stabilizers, and vice versa.
+        At the boundaries, new stabilizers are introduced to replace the ones that moved inward.
+        At the center diagonal, the X stabilizers stepping down merge into the Z stabilizers sitting along the diagonal.
+    }
+    \label{fig:patch_diagonal_twist}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \resizebox{\linewidth}{!}{
+        \includegraphics{assets/logical_error_paths.png}
+    }
+    \caption{
+        Logical error mechanisms that prevent the construction from getting smaller, shown as small bright cylinders travelling between darkened defects.
+        ``Input errors" are errors that occur while the patch is a normal logical qubit patch, before the switch to a degenerate patch.
+        The timelike Y error and timelike XZ errors are error mechanisms terminating on the time boundaries at the end of the measurement process.
+        The timelike errors are what determine how fast the logical Y basis measurement can be performed, and also the best basis for each data qubit measurement.
+        The spacelike Y error mechanism occurs when both $X$ and $Z$ errors travel from a corner twist to the crossing twist.
+        The switch-assisted errors are spacelike errors that occur during or near the transition, and are by far the most difficult error mechanisms to mitigate.
+    }
+    \label{fig:logical_error_paths}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \resizebox{\linewidth}{!}{
+        \includegraphics{assets/transition_detector_slices.png}
+    }
+    \caption{
+        A detector slice diagram of the surface code cycle where the logical qubit's Y observable is turned into a product of stabilizers, while continuing to measure the stabilizers of the patch.
+        This cycle is the core driver of the logical Y basis measurement.
+        Steps advance in reading order.
+        The colored shapes shown behind each step are stabilizers of the state after the operations from that step have executed, using the color-to-pauli convention RGB=XYZ.
+        Crossed circles linked to gray triangles are X-controlled Y gates which apply a Y gate to the target when the control qubit is in the $|-\rangle$ state.
+        This diagram shows the circuit before compilation into CZ gates.
+    }
+    \label{fig:transition_detector_slices}
+\end{figure}
+
+It's notable that the timelike Y error mechanism shown in \fig{logical_error_paths} has distance $d$, despite being caused by errors spanning across $d/2$ rounds and not spanning across space.
+This is because the relevant error mechanism requires a chain of X errors \emph{and} a chain of Z errors crossing the $d/2$ rounds.
+Although there are error mechanisms that grow X and Z error chains together across space (e.g. Y basis data errors), there is apparently no corresponding mechanism that does this across time.
+A consequence of this asymmetry between space and time is that, unlike most surface code constructions, the Y basis measurement has a preferred spacetime orientation.
+If it's present in a defect diagram of a surface code computation, performing a spacetime rotation of the diagram can reduce the code distance of the computation.
+For example, this is why \fig{other_improvements} has two cases.
+
+\begin{figure}
+    \centering
+    \resizebox{\linewidth}{!}{
+        \includegraphics{assets/other_improvements.png}
+    }
+    \caption{
+        Using fast Y basis measurement to perform an S gate by gate teleportation~\cite{gottesman1999gateteleport}.
+        In previous work, the S gate required $4 d^3$  volume~\cite{bombin2021logical,chamberland2022universal}.
+        Here the S gate uses $3 d^3$ volume (if applied to a stationary qubit) and $1.5d^3$ volume if applied while a qubit is being moved.
+        The dependence of the cost on the motion of the logical qubit is due to the diagonal-twist-movement technique presented in this paper being specific to moving diagonally across space (as opposed to across time or spacetime).
+        See \tbl{defect_types} for a summary of the types of defects appearing in this diagram.
+        The windows cut into the front faces are just to show the interior; they aren't actually present in the construction.
+    }
+    \label{fig:other_improvements}
+\end{figure}
+
+
+
+
+
+\section{Benchmarking}
+\label{sec:benchmarking}
+
+All circuits in this paper were simulated using the noise model defined in \app{noise_model}.
+Decoding was done using an internal correlated minimum weight perfect matching decoder written by Austin Fowler.
+For each circuit, samples were taken until either a thousand logical errors had been seen or a billion shots had been taken, whichever came first.
+All simulated circuits were variations on memory experiments.
+The code, circuits, and statistics are available \href{https://doi.org/10.5281/zenodo.7487893}{on Zenodo}~\cite{gidneyybasisdata2022}.
+
+In a memory experiment, a known logical state is initialized, protected against noise for some number of rounds, and then measured.
+The experiment succeeds if the measured state agrees with the prepared state, after error correction.
+Access to a Y basis measurement (and, by time reversal, a Y basis initialization), allows a Y basis memory experiment to be defined.
+
+An interesting property of the Y basis memory experiment is that preserving Y basis states (as opposed to X or Z basis states) better approximates the task of preserving the highly entangled states that would be present in a real quantum computation.
+Because X and Z type defects form 2D surfaces in spacetime, while Y type defects only form 1D curves, there are more opportunities for X type errors and Z type errors than Y type errors.
+Thus, logical errors in the surface code are biased away from being Y type errors, making X and Z type errors the dominant logical error mechanisms.
+Y basis states and highly entangled states are sensitive to both of these dominant logical error mechanisms, while X and Z basis states are only sensitive to one.
+This difference is especially clear when focusing on stabilizer dependence.
+Although an X basis memory experiment measures both X type and Z type stabilizers, the logical value can be error corrected using only the measurement results from the X type stabilizers.
+Similarly, a Z basis memory experiment can be error corrected using only the measurement results from the Z type stabilizers.
+Protecting a Y basis state, or a highly entangled state, requires both the X stabilizer measurements and the Z stabilizer measurements.
+The Y basis memory experiment exercises the whole surface code, instead of only half.
+
+The Y basis memory experiment can be used to experimentally determine the optimal number of padding rounds to use for Y basis initialization and Y basis measurement.
+If not enough padding rounds are used, timelike error mechanisms become dominant and limit the fidelity.
+But the benefit of adding padding rounds saturates once these timelike error mechanisms have been suppressed below the noise floor set by spacelike error mechanisms, such as memory errors incurred while the qubit idles.
+\fig{pad_saturation} presents the results of simulations varying the number of padding rounds, showing that the benefit of adding padding rounds saturates at around $d/2$ rounds of padding.
+
+Because the Y basis memory experiment is sensitive to both X and Z logical errors, I expected Y basis memory experiments to have logical error rates roughly twice as high as X and Z memory experiments.
+However, simulations showed that the logical error rate was actually two to three times higher than this expectation (see \fig{error_rate}).
+I was surprised by this difference, so I investigated where the additional error was coming from.
+
+Because of \fig{pad_saturation}, I knew timelike errors weren't the source of the problem.
+If they were, adding more padding would have fixed the issue.
+This left spacelike errors during the transition round as the likely cause.
+I checked this by isolating the transition round using magically noiseless time boundaries.
+(A magically noiseless time boundary performs perfect measurement of all stabilizers and observables of the code, preventing all error chains from crossing.)
+As a control, I also used magically noiseless time boundaries to isolate three rounds of idling in the Y basis from other rounds.
+Also, I took the opportunity to double-check the expectation that idling in the Y basis was twice as hard as idling in the X and Z bases.
+The results are shown in \fig{round_error_rate}, and indeed suggest that Y basis idling is twice as hard and that the transition round is the source of the additional errors.
+
+\fig{error_heat} digs further into the source of the extra errors by highlighting the paths that logical errors tend to follow during the transition round.
+It suggests that the problem is occurring along the path of the crossing twist.
+This makes sense, because the detectors along that path have the largest sensitivity regions (note where the biggest shapes are in \fig{transition_detector_slices}).
+This suggests that reducing the size of the detecting regions of the detectors along the crossing twist would bring the logical error rate in line with expectation, but as of this writing I don't know a way to achieve this.
+Although I consider the achieved logical error rate of my construction good enough for practical use, I'd be delighted if someone found a way to fix this stubborn blemish in its logical error rate.
+
+The last experiment that I simulated is an interesting variant of the Y basis memory experiment.
+In the normal Y basis memory experiment, which I'll now start calling ``the unlinked experiment" to avoid ambiguity, the initialization and measurement use the same orientation for the crossing twist.
+This produces a topology where the Y type defects form two unlinked rings in spacetime.
+In the other variant, which I'll call ``the braiding experiment", the initialization and measurement use opposite orientations, resulting in a topology where the Y type defects form linked rings (see \fig{experiment_defect_diagrams}).
+
+\fig{braiding_too_fast_error_rate} shows a key difference between the unlinked experiment and the braiding experiment.
+In the unlinked experiment, it's always beneficial to reduce the time spent between the initialization and the measurement, whereas in the braiding experiment spending too few rounds idling increases the error rate dramatically.
+This is because, in the unlinked experiment, the twist crossing the patch during initialization is part of the same spacetime object as the twist crossing the patch during measurement.
+An error chain travelling from an object to itself has no effect on the state of the system (it is, effectively, a product of stabilizers).
+In the braiding experiment, the twist crossing the patch during initialization is part of a different spacetime object than the twist crossing the patch during measurement.
+It's a logical error for error chains to travel between these two objects, and if there are too few idling rounds separating the objects then this error mechanism begins to dominate.
+
+\begin{figure}[H]
+    \centering
+    \resizebox{\linewidth}{!}{
+        \includegraphics{assets/pad_saturation.png}
+    }
+    \caption{
+        Varying the number of padding rounds at various code distances in the Y basis memory experiment.
+        When the number of padding rounds is too small, the error rate is limited by timelike errors.
+        As the number of padding rounds is increased, the effect of timelike errors is exponentially suppressed until they become negligible relative to spacelike error mechanisms.
+        The benefits of adding padding rounds saturates at around $d/2$ padding rounds.
+        Color highlights show hypotheses with a likelihood within a factor of 1000 of the maximum likelihood hypothesis, given the samples collected.
+    }
+    \label{fig:pad_saturation}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \resizebox{\linewidth}{!}{
+        \includegraphics{assets/error_rate.png}
+    }
+    \caption{
+        Comparing the Y basis memory experiment to X and Z basis memory experiments, at various code distances and for two different physical noise strengths.
+        When using the initialization and measurement presented in this paper, the Y basis memory experiment improves with code distance roughly as quickly as the X and Z basis memory experiments but has a starting logical error rate that is roughly five times higher.
+        Using the folded surface code to initialize and measure in the Y basis, using non-local connectivity, would improve the logical error rate.
+        Color highlights show hypotheses with a likelihood within a factor of 1000 of the maximum likelihood hypothesis, given the samples collected.
+    }
+    \label{fig:error_rate}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \resizebox{\linewidth}{!}{
+        \includegraphics{assets/braiding.png}
+    }
+    \caption{
+        Varying the number of rounds spent idling in the memory configuration in the two variations of the Y basis memory experiment.
+        At small numbers of idling rounds, a timelike error in the braiding experiment between the initialization and the measurement is dominant, causing an exponential jump in logical errors as idling rounds approaches zero.
+        Color highlights show hypotheses with a likelihood within a factor of 1000 of the maximum likelihood hypothesis, given the samples collected.
+    }
+    \label{fig:braiding_too_fast_error_rate}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \resizebox{0.8 \linewidth}{!}{
+        \includegraphics{assets/experiment_defect_diagrams.png}
+    }
+    \caption{
+        Defect diagrams summarizing experiments simulated in this paper.
+        See \tbl{defect_types} for a summary of the types of defects appearing in this diagram.
+    }
+    \label{fig:experiment_defect_diagrams}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \resizebox{\linewidth}{!}{
+        \includegraphics{assets/error_heat.png}
+    }
+    \caption{
+        Heatmap of decoding graph edges contributing to logical errors from the $d=7$, $p=0.1\%$ case of \fig{round_error_rate}.
+        Edges are highlighted relative to how often they appeared in logical errors (as a difference between the simulated noise's edges and the edges predicted by the decoder, keeping only the edges in connected components that flip the logical observable).
+        Boundary edges have had their hit count artificially halved, to compensate for symptom degeneracy at the sides of the patch.
+        Logical errors appear to be travelling along the twist during the Y basis transition.
+    }
+    \label{fig:error_heat}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \resizebox{\linewidth}{!}{
+        \includegraphics{assets/round_error_rate.png}
+    }
+    \caption{
+        Logical error rate during three rounds including a Y basis transition, versus three rounds of idling in various bases, with magically noiseless time boundaries before and after the rounds.
+        Color highlights show hypotheses with a likelihood within a factor of 1000 of the maximum likelihood hypothesis, given the samples collected.
+    }
+    \label{fig:round_error_rate}
+\end{figure}
+
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+In this paper, I presented a way to perform a Y basis measurement and Y basis initialization in $d/2 + O(1)$ rounds, without leaving the bounding box of the surface code patch.
+The spacetime volume of this construction is nearly an order of magnitude lower than achieved in previous work.
+I benchmarked the performance of this construction, and found that in short memory experiments it produces logical error rates two to three times higher than expected.
+The issue is annoying, but not fatal, and appears to have something to do with logical errors travelling along the crossing twist during the transition round.
+
+Having a faster Y basis measurement allows other computational primitives to be improved.
+For example, \fig{other_improvements} has concept diagrams for performing S gates by gate teleportation using Y basis measurement, using less spacetime volume than previous work.
+As another example, I expect faster Y basis measurement to be useful in the construction of magic state factories.
+Consider the magic state factories from \cite{fowler2018latticesurgery,gidney2019catalyzeddistillation}, which have columns topped with a layer of potential Y basis measurements.
+In those papers those measurements only need to achieve distance $d/2$, and those papers cautiously assumed that this would take $d$ rounds.
+With this new Y basis measurement construction, the target distance of $d/2$ can be achieved in $d/4$ rounds, increasing the execution speeds of those factories by around 10\%.
+
+An interesting feature of the Y basis measurement construction presented in this paper is that it can be run \emph{inplace}.
+Having an inplace Y measurement unlocks the ability to do tomography of a logical qubit, even on hardware only large enough to store a single logical qubit.
+For example, suppose you are interested in experimentally validating the fidelity of $|T\rangle$ state injection.
+If only X and Z basis measurement are available, it's impossible to distinguish between $|T\rangle$ and $|T^\dagger\rangle$, or between $|T\rangle$ and a partially dephased $|+\rangle$ state, because all these states have the same projection onto the XZ plane of the Bloch sphere.
+Adding the ability to do Y basis measurement makes these states distinguishable.
+
+Looking beyond the Y basis, I am hopeful that are other uses for the ability to move a twist diagonally through the surface code.
+More generally, I look forward to the discovery of more ways to move defects through space and time, in increasingly complex computational dances.
+
+\section{Acknowledgements}
+
+I thank Cody Jones for discussions that seeded the ideas that eventually turned into the Y basis measurement presented in this paper.
+I thank Matt McEwen for extensive discussions on the construction, and for encouragement to continue improving upon earlier versions of the circuit.
+I thank Austin Fowler for writing the correlated minimum weight perfect matching decoder used by this paper.
+I thank Hartmut Neven for creating an environment where this research was possible.
+
+\printbibliography
+
+\appendix
+
+\section{Surface Code Defects}
+\label{app:defects}
+
+\begin{table}[H]
+    \centering
+    \resizebox{\linewidth}{!}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c}
+         \hline
+         Defect Type & Name & Shape & Effect & In Diagrams \\
+         \hline
+         I & Bulk & 3D & Conserves X and Z detection event parity & Empty Space \\
+         X & X Boundary & 2D & Absorbs $X$ detection events & Red Walls \\
+         Z & Z Boundary & 2D & Absorbs $Z$ detection events & Blue Walls \\
+         H & Domain Wall & 2D & Cross-links $X \xleftrightarrow{} Z$ detection events across the wall & Transparent Yellow Walls\\
+         Y & Twist & 1D & Absorbs $X$-by-$Z$ detection events & Magenta Cylinders \\
+         \hline
+    \end{tabular}
+    }
+    \caption{
+        Summary of types of defects in surface code circuits.
+    }
+    \label{tbl:defect_types}
+\end{table}
+
+In the bulk of a surface code circuit, all errors produce an even number of X type detection events and an even number of Z type detection events.
+Said another way, the bulk of the surface code conserves X parity and Z parity.
+Defects are locations in spacetime where X parity or Z parity are broken, because errors can produce an odd number of X detection events and/or Z detection events.
+
+Important types of defects are summarized in \tbl{defect_types}.
+Locations in spacetime where an odd number of X detection events can be produced by an error are X type defects.
+Locations where an odd number of Z detection events can be produced by an error are Z type defects.
+Locations where an error can produce one X detection event paired with one Z detection event, breaking the individual X and Z parities but not necessarily the combined $X+Z$ parity, are H type or Y type defects.
+The distinction between H type and Y type is whether or not the X detection event and Z detection event produced by the error are separated by the defect or not.
+
+There are many different ways to implement defects, for example in the unrotated surface code a spatial X boundary is implemented by three body stabilizers whereas in the rotated surface code two body stabilizers are used.
+At a low level, the specific implementation used is extremely important because it affects performance (e.g. the threshold can depend on how defects are implemented).
+At a high level, the different implementations of defects are interchangeable.
+The computation performed by a surface code circuit can be understood in terms of the layout and topology of its defects across spacetime, without knowing how exactly the defects are implemented.
+
+\section{Noise Model}
+\label{app:noise_model}
+
+All circuits in this paper were simulated using the same superconducting-inspired noise model defined in \tbl{noise_model}.
+In legends, this noise model is called ``SI1000" (short for Superconducting Inspired with 1000 nanosecond cycle).
+To provide a reference for comparisons to other error models or to hardware, the detection event fraction of the model at various noise strengths is plotted in \fig{det_frac}.
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|r|l|}
+    \hline
+    Ideal gate & Noisy gate
+    \\
+    \hline
+    (any single qubit unitary, including idling) $U_1$ & $U_1 \circ \text{DEP1}(p / 10)$
+    \\
+    $CZ$ & $CZ \circ \text{DEP2}(p)$
+    \\
+    \hline
+    $R_Z$ & $R_Z \circ \text{XERR}(2p)$
+    \\
+    $M_Z$ & $M_Z \circ \text{MERR}(5p) \circ \text{DEP1}(p)$
+    \\
+    \hline
+    (Wait for $M_Z$ or $R_Z$) & $\text{DEP1}(2p)$
+    \\
+    \hline
+    \end{tabular}
+    \caption{
+        The superconducting-inspired noise model used by simulations in this paper.
+        Same as ``SI1000" from \cite{gidney2021honeycombmemory}.
+        The single parameter $p$ sets the two qubit gate error rate, with other error rates being relative to this rate.
+        Measurements are noisiest while single qubit gates are least noisy.
+        Qubits not being reset or measured during layers containing measurements or resets incur additional depolarization on top of other error mechanisms.
+        Note $A \circ B = B \cdot A$ means $B$ is applied after $A$.
+        Noise channels are defined in \tbl{noise_channels}.
+    }
+    \label{tbl:noise_model}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|r|l|}
+    \hline
+    Noise channel & Probability distribution of effects
+    \\
+    \hline
+    $\text{MERR}(p)$ & $\begin{aligned}
+        1-p &\rightarrow \text{(report previous measurement correctly)}
+        \\
+        p &\rightarrow \text{(report previous measurement incorrectly; flip its result)}
+    \end{aligned}$
+    \\
+    \hline
+    $\text{XERR}(p)$ & $\begin{aligned}
+        1-p &\rightarrow I
+        \\
+        p &\rightarrow X
+    \end{aligned}$
+    \\
+    \hline
+    $\text{ZERR}(p)$ & $\begin{aligned}
+        1-p &\rightarrow I
+        \\
+        p &\rightarrow Z
+    \end{aligned}$
+    \\
+    \hline
+    $\text{DEP1}(p)$ & $\begin{aligned}
+        1-p &\rightarrow I
+        \\
+        p/3 &\rightarrow X
+        \\
+        p/3 &\rightarrow Y
+        \\
+        p/3 &\rightarrow Z
+    \end{aligned}$
+    \\
+    \hline
+    $\text{DEP2}(p)$ & $\begin{aligned}
+        1-p &\rightarrow I \otimes I
+        &\;\;
+        p/15 &\rightarrow I \otimes X
+        &\;\;
+        p/15 &\rightarrow I \otimes Y
+        &\;\;
+        p/15 &\rightarrow I \otimes Z
+        \\
+        p/15 &\rightarrow X \otimes I
+        &\;\;
+        p/15 &\rightarrow X \otimes X
+        &\;\;
+        p/15 &\rightarrow X \otimes Y
+        &\;\;
+        p/15 &\rightarrow X \otimes Z
+        \\
+        p/15 &\rightarrow Y \otimes I
+        &\;\;
+        p/15 &\rightarrow Y \otimes X
+        &\;\;
+        p/15 &\rightarrow Y \otimes Y
+        &\;\;
+        p/15 &\rightarrow Y \otimes Z
+        \\
+        p/15 &\rightarrow Z \otimes I
+        &\;\;
+        p/15 &\rightarrow Z \otimes X
+        &\;\;
+        p/15 &\rightarrow Z \otimes Y
+        &\;\;
+        p/15 &\rightarrow Z \otimes Z
+    \end{aligned}$
+    \\
+    \hline
+    \end{tabular}
+    \caption{
+        Definitions of various noise channels.
+        Used by \tbl{noise_model}.
+    }
+    \label{tbl:noise_channels}
+\end{table}
+
+\begin{figure}
+    \centering
+    \resizebox{\linewidth}{!}{
+        \includegraphics{assets/det_frac.png}
+    }
+    \caption{
+        Detection event fraction of basic memory experiment circuits in the SI1000 noise model.
+        The detection event fraction is the probability of a detector producing a detection event, averaged over all detectors in the circuit.
+    }
+    \label{fig:det_frac}
+\end{figure}
+
+
+\section{Strategies for building complex QEC circuits}
+\label{app:the_struggle}
+
+In the past, when I've built quantum error correction circuits, I've used a strategy based on writing code to produce the desired circuit and then verifying that the final circuit was correct (e.g. by using Stim~\cite{gidney2021stim} to verify the circuit's graphlike code distance is as expected).
+For the Y basis circuits presented in this paper, that approach didn't work.
+There were two major obstacles.
+First, although I could see roughly what had to happen in the circuit, I found it very difficult to work out exactly what the circuit should look like along the twist and at the boundaries of the patch.
+Second, even once I knew what the circuit should look like, it was difficult to write correct code for producing the circuit due to there being so many opportunities for easy-to-make mistakes like off-by-one errors and sign errors.
+Because of the these two obstacles, I would often get stuck in loops of fixing a problem by introducing a different problem.
+
+To make it easier to figure out what the circuit should look like, I wrote a stabilizer circuit editor with interactive automatic Pauli product propagation (see \fig{crumble}).
+This was helpful for two reasons.
+First, tracking Pauli observables is a very common task when designing QEC circuits, but it's slow and error-prone to do by hand.
+Computer software can do it billions of times faster, and more reliably.
+Second, manually editing the circuit is a much more direct form of interaction than iterating on code for producing a circuit~\cite{brettvictormediaforthinking2013}.
+This completely nullifies whole classes of errors.
+For example, I make off-by-one errors when placing gates by math but I don't make these errors when placing gates by hand.
+The key circuit cycle in \fig{transition_detector_slices} was built, end to end, in this interactive editor before being translated into code.
+
+To overcome the fact that each piece of the circuit was hard to get right, I switched from an integration testing paradigm to a unit testing paradigm.
+I focused on verifying that each individual surface code cycle was correct before attempting to combine it with the other cycles.
+Each cycle was still defined by a circuit, but now each cycle also had an accompanying list of required ``stabilizer flows".
+A stabilizer flow $A \xrightarrow{M} B$ has a desired starting stabilizer $A$, an expected ending stabilizer $B$, and a set of measurements $M$ to multiply into the stabilizer as it travels across the circuit.
+For example, if a cycle was supposed to measure a stabilizer $S$ using measurements $m_1$ and $m_2$, then its list of stabilizer flows would contain $S \xrightarrow{m_1, m_2} 1$.
+This allows each piece of the circuit to be independently verified because, given a circuit and a list of stabilizer flows, it's possible to mechanically check whether or not the circuit has all the flows.
+
+As a result of using this approach to piece verification, I found myself undergoing an interesting conceptual shift.
+I stopped thinking of surface code rounds as \emph{preserving} stabilizers, and started thinking of them as \emph{recreating} stabilizers.
+Instead of specifying $A \rightarrow A$ and $A \xrightarrow{m} 1$ (translating to ``$A$ is preserved and $A$ is measured", I found it more useful to specify $A \rightarrow 1$ and $1 \rightarrow A$ (translating to ``$A$ is measured and $A$ is prepared").
+The benefit of this approach is that, when composing circuits, their flows can be matched together in order to form detectors.
+This turns annotating detectors, which I previously found to be one of the most error prone integration processes, into an automatic process.
+A free benefit of annotating the stabilizer flows.
+
+
+\begin{figure}
+    \centering
+    \resizebox{\linewidth}{!}{
+    \includegraphics{assets/crumble.png}
+    }
+    \caption{
+        Screenshot of ``Crumble", a stabilizer circuit editor that allows Pauli products to be interactively introduced and automatically propagated.
+        Crumble is still in development but will eventually be released publicly.
+    }
+    \label{fig:crumble}
+\end{figure}
+
+
+
+\clearpage
+\section{Example Circuit}
+\label{app:example_circuit}
+
+The following is a Stim circuit file \cite{stimcircuitformat} describing the initialization of the logical Y observable of a distance 3 surface code patch.
+The circuit is cut off after the observable is initialized, is not compiled into CZ gates, and doesn't include noise, so that it can fit on one page.
+See the zenodo data set~\cite{gidneyybasisdata2022} for complete circuits.
+
+\begin{lstlisting}[style=stimcircuit]
+QUBIT_COORDS(0, 0) 0
+QUBIT_COORDS(0, 1) 1
+QUBIT_COORDS(0, 2) 2
+QUBIT_COORDS(1, 0) 3
+QUBIT_COORDS(1, 1) 4
+QUBIT_COORDS(1, 2) 5
+QUBIT_COORDS(2, 0) 6
+QUBIT_COORDS(2, 1) 7
+QUBIT_COORDS(2, 2) 8
+QUBIT_COORDS(-0.5, 1.5) 9
+QUBIT_COORDS(0.5, -0.5) 10
+QUBIT_COORDS(0.5, 0.5) 11
+QUBIT_COORDS(0.5, 1.5) 12
+QUBIT_COORDS(1.5, -0.5) 13
+QUBIT_COORDS(1.5, 0.5) 14
+QUBIT_COORDS(1.5, 1.5) 15
+QUBIT_COORDS(1.5, 2.5) 16
+QUBIT_COORDS(2.5, 0.5) 17
+QUBIT_COORDS(2.5, 1.5) 18
+# ===== DATA INIT CYCLE =====
+R 15 13 11 9 6 4 3 2 1
+RX 8 7 5 18 16 14 12
+TICK
+CX 18 8 14 4 12 2 5 15 3 13 1 11
+TICK
+CX 14 7 12 5 4 15
+TICK
+CX 18 7 16 5 14 3 12 1 8 15 6 13 4 11 2 9
+TICK
+CX 16 8 14 6 12 4 7 15 3 11 1 9
+TICK
+M 15 13 11 9
+MX 18 16 14 12
+DETECTOR(-0.5, 1.5, 0) rec[-5]
+DETECTOR(0.5, 0.5, 0) rec[-6]
+DETECTOR(1.5, -0.5, 0) rec[-7]
+DETECTOR(1.5, 2.5, 0) rec[-3]
+DETECTOR(2.5, 1.5, 0) rec[-4]
+SHIFT_COORDS(0, 0, 1)
+TICK
+# ===== PAD CYCLE =====
+R 15 13 11 9
+RX 18 16 14 12
+TICK
+CX 18 8 14 4 12 2 5 15 3 13 1 11
+TICK
+CX 14 7 12 5 4 15
+TICK
+CX 18 7 16 5 14 3 12 1 8 15 6 13 4 11 2 9
+TICK
+CX 16 8 14 6 12 4 7 15 3 11 1 9
+TICK
+M 15 13 11 9
+MX 18 16 14 12
+DETECTOR(-0.5, 1.5, 0) rec[-13] rec[-5]
+DETECTOR(0.5, 0.5, 0) rec[-14] rec[-6]
+DETECTOR(0.5, 1.5, 0) rec[-9] rec[-1]
+DETECTOR(1.5, -0.5, 0) rec[-15] rec[-7]
+DETECTOR(1.5, 0.5, 0) rec[-10] rec[-2]
+DETECTOR(1.5, 1.5, 0) rec[-16] rec[-8]
+DETECTOR(1.5, 2.5, 0) rec[-11] rec[-3]
+DETECTOR(2.5, 1.5, 0) rec[-12] rec[-4]
+SHIFT_COORDS(0, 0, 1)
+TICK
+# ===== TRANSITION CYCLE ====
+R 15 13 11 10 9
+RY 0
+RX 18 17 16 14 12
+TICK
+SQRT_X 15 11
+H 18 17 14 13 10 7 6 3
+TICK
+XCY 8 18 4 14
+TICK
+CX 1 9 16 8 12 4 17 7 13 3
+TICK
+CX 2 9 16 5 12 1
+XCY 15 8 11 4
+CX 13 6 7 18 3 14
+TICK
+CX 6 17 4 15 0 11 14 7 12 5 10 3
+TICK
+CX 7 17 5 15 1 11 14 4 12 2 10 0
+TICK
+M 18 17 15 11 9
+MX 16 14 13 12 10
+DETECTOR(-0.5, 1.5, 0) rec[-15] rec[-6]
+DETECTOR(0.5, 0.5, 0) rec[-16] rec[-7] rec[-1]
+DETECTOR(0.5, 1.5, 0) rec[-11] rec[-2]
+DETECTOR(1.5, -0.5, 0) rec[-17] rec[-3]
+DETECTOR(1.5, 0.5, 0) rec[-12] rec[-9]
+DETECTOR(1.5, 1.5, 0) rec[-18] rec[-8] rec[-4]
+DETECTOR(1.5, 2.5, 0) rec[-13] rec[-5]
+DETECTOR(2.5, 1.5, 0) rec[-14] rec[-10]
+OBSERVABLE_INCLUDE(0) rec[-10] rec[-9] rec[-5] rec[-2]
+# ===== Y OBSERVABLE IS NOW INITIALIZED =====
+\end{lstlisting}
+
+\end{document}

@@ -111,9 +111,9 @@ literate={*}{{\char42}}1
 
 \begin{abstract}
 In this paper, I cut the cost of Y basis measurement and initialization in the surface code by nearly an order of magnitude.
-By fusing twist defects diagonally across the surface code patch, the Y basis is reached in $\lfloor d/2 \rfloor + 2$ rounds without leaving the bounding box of the patch and without reducing the code distance.
+Fusing twist defects diagonally across the surface code patch reaches the Y basis in $\lfloor d/2 \rfloor + 2$ rounds, without leaving the bounding box of the patch and without reducing the code distance.
 I use Monte Carlo sampling to benchmark the performance of the construction under circuit noise, and to analyze the distribution of logical errors.
-Cheap inplace Y basis measurement reduces the cost of S gates and magic state factories, and unlocks tomography of surface code qubits on space-limited hardware.
+Cheap inplace Y basis measurement reduces the cost of S gates and magic state factories, and unlocks Pauli measurement tomography of surface code qubits on space-limited hardware.
 \end{abstract}
 
 \emph{The source code that was written, the exact noisy circuits that were sampled, and the statistics that were collected as part of this paper are available at \href{https://doi.org/10.5281/zenodo.7487893}{doi.org/10.5281/zenodo.7487893}~\cite{gidneyybasisdata2022}.}
@@ -126,7 +126,7 @@ Cheap inplace Y basis measurement reduces the cost of S gates and magic state fa
 Because the surface code is a CSS code, its X and Z observables can be measured transversally.
 The Y observable can't be measured transversally, and so must be reached by other means.
 The cost of Y basis measurement is surprisingly relevant to the overall cost of surface code computations because, in many magic state factory designs~\cite{fowler2018latticesurgery,gidney2019catalyzeddistillation,litinski2018}, distilling a magic state involves hundreds of Y basis measurements.
-If running Shor's algorithm costs a billion Toffoli gates~\cite{gidney2017factoring,soeken2020improved} then, by implication, running Shor's algorithm also costs hundreds of billions of Y basis measurements.
+If running Shor's algorithm costs a billion Toffoli gates~\cite{gidney2021factor,soeken2020improved} then, by implication, running Shor's algorithm also costs hundreds of billions of Y basis measurements.
 The inefficiency of magic state factories magnifies the benefits of improving the cost of Y basis measurement.
 
 Over the past decade, the cost of Y basis measurement and initialization in the surface code has dropped dramatically (see \fig{historical_progression}).
@@ -197,7 +197,7 @@ The tactics I used to find satisfying circuits are summarized in \app{the_strugg
 
 The best circuit that I found for moving a twist diagonally is summarized in \fig{patch_diagonal_twist}, and shown exactly in \fig{transition_detector_slices}.
 This circuit manages to merge all necessary qubit movement into a working surface code cycle, while using only one additional layer of entangling gates, and while preserving the full code distance.
-The idea that led to this circuit was to try running a normal surface code cycle in the bottom left of the patch while running a walking surface code cycle~[[[CITE WORK IN PROGRESS]]] in the top right of the patch.
+The idea that led to this circuit was to try running a normal surface code cycle in the bottom left of the patch while running a walking surface code cycle~\cite{mcewenmidoutsurfaces2023} in the top right of the patch.
 I reasoned that the walking effect could be used to implement the domain wall defect that must be attached to the crossing twist, and that other details would follow as a consequence of this choice.
 Turning this idea into a complete circuit required finding a way to mesh the walking surface code cycle with the normal surface code cycle at the seam where they met, and finding a way to have the walking surface code switch the types of the boundaries of the patch instead of moving them.
 
@@ -306,11 +306,28 @@ The construction achieves the full code distance of the patch.
         A detector slice diagram of the surface code cycle where the logical qubit's Y observable is turned into a product of stabilizers, while continuing to measure the stabilizers of the patch.
         This cycle is the core driver of the logical Y basis measurement.
         Steps advance in reading order.
-        The colored shapes shown behind each step are stabilizers of the state after the operations from that step have executed, using the color-to-pauli convention RGB=XYZ.
+        The colored shapes shown behind each step are stabilizers of the state after the operations from that step have executed, using the color-to-pauli convention RGB=XYZ (red is X, green is Y, blue is Z).
         Crossed circles linked to gray triangles are X-controlled Y gates which apply a Y gate to the target when the control qubit is in the $|-\rangle$ state.
         This diagram shows the circuit before compilation into CZ gates.
+        See also \fig{obs_slice}.
     }
     \label{fig:transition_detector_slices}
+\end{figure}
+\begin{figure}
+    \centering
+    \resizebox{\linewidth}{!}{
+        \includegraphics{assets/obs_slice.png}
+    }
+    \caption{
+        Observable slice diagram of the surface code cycle where the logical qubit's Y observable is turned into a product of stabilizers.
+        Filled circles are terms of the observable after the operations from that step have executed, using the color-to-pauli convention RGB=XYZ (red is X, green is Y, blue is Z).
+        Unfilled circles are terms of the observable from before the operations from that step were executed.
+        In the first step, the terms form a typical Y basis observable.
+        In the second step, single qubit terms prepared by reset gates are added into the observable.
+        The observable is then deformed by Clifford operations until, in the last step, all its terms disappear into measurements.
+        Although the observable is now physically measured, more rounds of stabilizer measurement are needed in order to correct errors to make the logical measurement fault tolerant.
+    }
+    \label{fig:obs_slice}
 \end{figure}
 
 It's notable that the timelike Y error mechanism shown in \fig{logical_error_paths} has distance $d$, despite being caused by errors spanning across $d/2$ rounds and not spanning across space.
@@ -327,12 +344,12 @@ Avoiding this problem is why \fig{other_improvements} has two cases, one for spa
         \includegraphics{assets/other_improvements.png}
     }
     \caption{
-        Using fast Y basis measurement to perform an S gate by gate teleportation~\cite{gottesman1999gateteleport}.
+        ZX calculus diagrams and defect diagrams of using fast Y basis measurement to perform an S gate by gate teleportation~\cite{gottesman1999gateteleport}.
         In previous work, the S gate required $4 d^3$  volume~\cite{bombin2021logical,chamberland2022universal}.
-        Here the S gate uses $3 d^3$ volume (if applied to a stationary qubit) and $1.5d^3$ volume if applied while a qubit is being moved.
+        Here the S gate uses $3 d^3$ volume if applied to a stationary qubit, or $1.5d^3$ volume if applied while a qubit is being moved.
         The dependence of the cost on the motion of the logical qubit is due to the diagonal-twist-movement technique presented in this paper being specific to moving diagonally across space (as opposed to across time or spacetime).
         See \tbl{defect_types} for a summary of the types of defects appearing in this diagram.
-        The windows cut into the front faces are just to show the interior; they aren't actually present in the construction.
+        The windows cut into the front faces of the defects are just to show the interior; they aren't actually present in the construction.
     }
     \label{fig:other_improvements}
 \end{figure}
@@ -370,7 +387,7 @@ Protecting a Y basis state, or a highly entangled state, requires both the X sta
 The Y basis memory experiment exercises the whole surface code, instead of only half.
 
 Because the Y basis memory experiment is sensitive to both X and Z logical errors, I expected Y basis memory experiments to have logical error rates roughly twice as high as X and Z memory experiments.
-However, simulations showed that the logical error rate was actually an additional two to three times higher than this expectation (see \fig{error_rate}).
+However, simulations showed that the logical error rate was actually an additional 1.5 to 2.5 times higher than this expectation (see \fig{error_rate}).
 I was surprised by this difference, so I investigated where the additional error was coming from.
 
 Because of \fig{pad_saturation}, I knew timelike errors weren't the source of the problem.
@@ -385,7 +402,7 @@ They suggest that the transition round is the source of the additional errors.
 
 \fig{error_heat} digs further into the source of the extra errors by highlighting the paths that logical errors tend to follow during the transition round.
 It suggests that the problem is occurring along the path of the crossing twist.
-This makes sense to me, because the detectors along that path have the largest sensitivity regions (note where the biggest shapes are in \fig{transition_detector_slices}).
+This makes sense to me, because the detectors along that path have the largest detecting regions (note where the biggest shapes are in \fig{transition_detector_slices}).
 This suggests that reducing the size of those detecting regions could bring the logical error rate in line with expectation.
 This is a place where there's room for improvement in the circuit construction.
 
@@ -408,7 +425,7 @@ For example, the spacetime volume of a CNOT operation is reported based on a spe
 Other orientations require more volume.
 The sheer variety of possible contexts, and in particular the complex interdependence between how qubits are routed and oriented and operated upon, mean that describing the cost of a single operation using a single number is unavoidably an approximation.
 Ultimately, there are situations where the marginal cost of a Y basis measurement is in fact $d/2 + O(1)$ rounds and, based on my anecdotal experience assembling large surface code computations, I expect that these situations will be by far the most common.
-Therefore, I think $d/2 + O(1)$ rounds is the most appropriate number to use to describe the time it takes to perform the Y basis measurement presented in this paper.
+Therefore, despite the inherent ambiguity, I think $d/2 + O(1)$ rounds is the most appropriate number to use to describe the time it takes to perform the Y basis measurement presented in this paper.
 
 \begin{figure}[H]
     \centering
@@ -518,7 +535,7 @@ More generally, I look forward to the discovery of more ways to lay defects acro
 I thank Cody Jones for discussions that seeded the ideas that eventually turned into the Y basis measurement presented in this paper.
 I thank Matt McEwen for extensive discussions on the construction, and for encouragement to continue improving upon earlier versions of the circuit.
 I thank Austin Fowler for writing the correlated minimum weight perfect matching decoder used by this paper.
-I thank Austin Fowler, Kevin Satzinger, and Alexis Morvan for giving feedback that improved the paper.
+I thank Austin Fowler, Alexis Morvan, Mike Newman, and Kevin Satzinger for giving feedback that improved the paper.
 I thank Hartmut Neven for creating an environment where this research was possible.
 
 \printbibliography
@@ -564,10 +581,11 @@ Locations where an error can produce one X detection event paired with one Z det
 The distinction between H type defects (``domain walls") and Y type defects (``twists") is whether or not it's possible to use the defect to terminate a combined chain of X errors and Z errors arriving from the same direction.
 An H type defect can't be used to terminate such a chain, because the relevant errors always place the relevant X/Z detection events on opposite sides of the wall.
 A Y type defect differs in that it can terminate such a chain.
-For example, when a domain wall ends in the bulk, it always ends on a Y type defect because at that location one of the errors can go around the wall to meet the detection event hiding on the other side of the wall.
+For example, when a domain wall ends in the bulk, it always ends on a Y type defect because at that location errors can push a detection event around the wall to annihilate against a detection event that crossed through the wall.
 
 There are many different ways to implement defects.
 For example, in the unrotated surface code, a spatial X boundary is implemented by three body stabilizers whereas, in the rotated surface code, two body stabilizers are used.
+Another example: the bulk of the surface code can be implemented on a square grid or on a hex grid~\cite{mcewenmidoutsurfaces2023}.
 At a low level, the specific implementation used is extremely important because it affects performance (e.g. it can change the threshold).
 At a high level, the different implementations of defects are interchangeable.
 The computation performed by a surface code circuit can be understood in terms of the layout and topology of its spacetime defects, without knowing exactly how the defects are implemented.
@@ -747,10 +765,9 @@ This turns annotating detectors, which I previously found to be one of the most 
     }
     \caption{
         Screenshot of ``Crumble", a stabilizer circuit editor that allows Pauli products to be interactively introduced and automatically propagated.
-        Although Crumble is still in the prototyping stage, with core functionality unfinished and a complete lack of user interface polish, it was crucial enough to my process of creating and understanding the circuits described in this paper that I felt it would be cruel to withhold from readers.
-        A prototype version of Crumble can be accessed by installing stim 1.11.dev1673388860 or later, printing the output of stim.Circuit().diagram("interactive") to an HTML file, then opening the file in a web browser.
+        Although Crumble is still in the prototyping stage, with core functionality unfinished and a complete lack of user interface polish, it was crucial to my process of creating and understanding the circuits described in this paper.
+        A prototype version of Crumble can be accessed by following the directions in \href{https://github.com/quantumlib/Stim/blob/main/glue/crumble/README.md}{Crumble's README file}.
         The circuits described in this paper can be loaded into Crumble by downloading the circuit files from Zenodo~\cite{gidneyybasisdata2022} and using Crumble's Import/Export button to paste and load the contents of a circuit into the editor.
-        The closest thing to a user manual at this point in time is \href{https://github.com/quantumlib/Stim/blob/main/glue/crumble/README.md}{Crumble's README file}.
     }
     \label{fig:crumble}
 \end{figure}

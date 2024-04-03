@@ -783,6 +783,7 @@ Each cycle was still defined by a circuit, but now each cycle also had an accomp
 A stabilizer flow $A \xrightarrow{m} B$ has a desired starting stabilizer $A$, an expected ending stabilizer $B$, and a set of measurements $m$ to multiply into the stabilizer as it travels across the circuit.
 For example, if a cycle was supposed to measure a stabilizer $S$ using measurements $m_1$ and $m_2$, then its list of stabilizer flows would contain $S \xrightarrow{m_1, m_2} 1$.
 This allows each piece of the circuit to be independently verified because, given a circuit and a list of stabilizer flows, it's possible to mechanically check whether or not the circuit has all the flows.
+(Note from the future: I ported my method for verifying flows into Stim. It can be used by calling \href{https://github.com/quantumlib/Stim/blob/main/doc/python_api_reference_vDev.md#stim.Circuit.has_all_flows}{\path{stim.Circuit.has_all_flows}}.)
 
 As a result of using this approach to piece verification, I found myself undergoing an interesting conceptual shift.
 I stopped thinking of surface code rounds as \emph{preserving} stabilizers, and started thinking of them as \emph{recreating} stabilizers.
@@ -798,7 +799,7 @@ This turns annotating detectors, which I previously found to be one of the most 
     \caption{
         Screenshot of ``Crumble", a stabilizer circuit editor that allows Pauli products to be interactively introduced and automatically propagated.
         Although Crumble is still in the prototyping stage, with core functionality unfinished and a complete lack of user interface polish, it was crucial to my process of creating and understanding the circuits described in this paper.
-        A prototype version of Crumble can be accessed at following the directions in \href{https://algassert.com/crumble}{algassert.com/crumble}.
+        A prototype version of Crumble can be accessed at \href{https://algassert.com/crumble}{algassert.com/crumble}.
         The circuits described in this paper can be loaded into Crumble by downloading the circuit files from Zenodo~\cite{gidneyybasisdata2022} and using Crumble's Import/Export button to paste and load the contents of a circuit into the editor.
     }
     \label{fig:crumble}
